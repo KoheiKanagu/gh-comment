@@ -1,35 +1,60 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-echo "Hello gh-comment!"
+dry_run=true
+labels_arg=""
+body_arg=""
 
-# Snippets to help get started:
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --labels)
+        labels_arg="$2"
+        shift
+        ;;
+    --force)
+        dry_run=false
+        ;;
+    --body)
+        body_arg="$2"
+        shift
+        ;;
+    -h | --help)
+        echo "Usage: gh comment [options]"
+        echo "Options:"
+        echo "  --labels <labels>  Specify labels to filter"
+        echo "  --body <body>      Specify body of comment"
+        echo "  --force            Do not dry run"
+        echo "  -h, --help         Show this help message and exit"
+        exit 0
+        ;;
+    esac
+    shift
+done
 
-# Determine if an executable is in the PATH
-# if ! type -p ruby >/dev/null; then
-#   echo "Ruby not found on the system" >&2
-#   exit 1
-# fi
+if [ -z "$body_arg" ]; then
+    echo "Body is required"
+    exit 1
+fi
 
-# Pass arguments through to another command
-# gh issue list "$@" -R cli/cli
+lines=$(
+    gh pr list \
+        --label "$labels_arg" \
+        --json number,title,url \
+        --jq '.[]'
+)
 
-# Using the gh api command to retrieve and format information
-# QUERY='
-#   query($endCursor: String) {
-#     viewer {
-#       repositories(first: 100, after: $endCursor) {
-#         nodes {
-#           nameWithOwner
-#           stargazerCount
-#         }
-#       }
-#     }
-#   }
-# '
-# TEMPLATE='
-#   {{- range $repo := .data.viewer.repositories.nodes -}}
-#     {{- printf "name: %s - stargazers: %v\n" $repo.nameWithOwner $repo.stargazerCount -}}
-#   {{- end -}}
-# '
-# exec gh api graphql -f query="${QUERY}" --paginate --template="${TEMPLATE}"
+while read -r line; do
+    number=$(echo "$line" | jq -r '.number')
+    title=$(echo "$line" | jq -r '.title')
+    url=$(echo "$line" | jq -r '.url')
+
+    echo "~~~"
+    echo -e "\033[0;32m#$number\033[0m $title"
+    echo -e "\033[0;33m$url\033[0m"
+
+    if [ "$dry_run" = true ]; then
+        echo "→ Dry run, skipping..."
+        continue
+    fi
+    gh pr comment "$number" --body "$body_arg"
+done <<<"$lines"
